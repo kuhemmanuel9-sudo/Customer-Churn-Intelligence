@@ -1,0 +1,636 @@
+# CUSTOMER CHURN INTELLIGENCE
+# Predictive Modeling, Customer Segmentation & Retention Analysis
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.cluster import KMeans
+
+from sklearn.metrics import (
+    classification_report,
+    accuracy_score,
+    confusion_matrix,
+    roc_auc_score,
+    average_precision_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    silhouette_score
+)
+
+
+# ============================================================
+# 1. LOAD DATA
+# ============================================================
+
+df = pd.read_csv("Churn_Modelling.csv")
+
+print("Dataset shape:", df.shape)
+print("\nColumns:")
+print(df.columns.tolist())
+
+print("\nMissing values:")
+print(df.isnull().sum())
+
+print("\nDuplicate rows:", df.duplicated().sum())
+
+
+# ============================================================
+# 2. DATA CLEANING
+# ============================================================
+
+# These variables identify customers but do not provide useful
+# behavioral information for the churn model.
+df = df.drop(
+    columns=["RowNumber", "CustomerId", "Surname"],
+    errors="ignore"
+)
+
+# Human-readable version of the target for EDA only.
+# This variable will NOT be included in the ML models.
+df["ChurnStatus"] = df["Exited"].map({
+    0: "Stayed",
+    1: "Exited"
+})
+
+print("\nChurn distribution:")
+print(df["ChurnStatus"].value_counts())
+
+print("\nChurn rate:")
+print(f"{df['Exited'].mean() * 100:.2f}%")
+
+
+# ============================================================
+# 3. EXPLORATORY DATA ANALYSIS
+# ============================================================
+
+# Average characteristics of customers who stayed vs. exited.
+numeric_summary = df.groupby("ChurnStatus")[
+    [
+        "CreditScore",
+        "Age",
+        "Tenure",
+        "Balance",
+        "NumOfProducts",
+        "EstimatedSalary"
+    ]
+].mean().round(2)
+
+print("\nCustomer characteristics by churn status:")
+print(numeric_summary)
+
+
+# Churn by geography
+geography_churn = pd.crosstab(
+    df["Geography"],
+    df["ChurnStatus"],
+    normalize="index"
+).round(3) * 100
+
+print("\nChurn by geography (%):")
+print(geography_churn)
+
+
+# Churn by gender
+gender_churn = pd.crosstab(
+    df["Gender"],
+    df["ChurnStatus"],
+    normalize="index"
+).round(3) * 100
+
+print("\nChurn by gender (%):")
+print(gender_churn)
+
+
+# Churn by active membership
+activity_churn = pd.crosstab(
+    df["IsActiveMember"],
+    df["ChurnStatus"],
+    normalize="index"
+).round(3) * 100
+
+print("\nChurn by membership activity (%):")
+print(activity_churn)
+
+
+# Product-count analysis
+product_churn = (
+    df.groupby("NumOfProducts")["Exited"]
+    .agg(
+        Customers="count",
+        Exited="sum",
+        ChurnRate="mean"
+    )
+)
+
+product_churn["ChurnRate"] *= 100
+product_churn["ChurnRate"] = product_churn["ChurnRate"].round(1)
+
+print("\nChurn by number of products:")
+print(product_churn)
+
+
+# ============================================================
+# 4. PREPARE DATA FOR MACHINE LEARNING
+# ============================================================
+
+# Exited is the target.
+# ChurnStatus is excluded because it contains the same information
+# as Exited and would create target leakage.
+X = df.drop(
+    columns=["Exited", "ChurnStatus"]
+)
+
+y = df["Exited"]
+
+
+# One-hot encode categorical predictors.
+# France and Female become reference categories.
+X = pd.get_dummies(
+    X,
+    columns=["Geography", "Gender"],
+    drop_first=True,
+    dtype=int
+)
+
+feature_names = X.columns.tolist()
+
+print("\nModel features:")
+print(feature_names)
+
+
+# Stratification preserves the churn proportion in both samples.
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.20,
+    random_state=42,
+    stratify=y
+)
+
+
+# Standardization is fitted ONLY on training data to avoid
+# leaking information from the test set.
+scaler = StandardScaler()
+
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+print("\nTraining observations:", X_train.shape[0])
+print("Testing observations:", X_test.shape[0])
+
+
+# ============================================================
+# 5. MODEL 1: LOGISTIC REGRESSION
+# ============================================================
+
+logit = LogisticRegression(
+    max_iter=1000,
+    random_state=42
+)
+
+logit.fit(X_train_scaled, y_train)
+
+logit_pred = logit.predict(X_test_scaled)
+logit_prob = logit.predict_proba(X_test_scaled)[:, 1]
+
+
+# ============================================================
+# 6. MODEL 2: NEURAL NETWORK
+# ============================================================
+
+nn = MLPClassifier(
+    hidden_layer_sizes=(10,),
+    activation="relu",
+    solver="adam",
+    alpha=0.01,
+    max_iter=1000,
+    random_state=42
+)
+
+nn.fit(X_train_scaled, y_train)
+
+nn_pred = nn.predict(X_test_scaled)
+nn_prob = nn.predict_proba(X_test_scaled)[:, 1]
+
+
+# ============================================================
+# 7. MODEL 3: RANDOM FOREST
+# ============================================================
+
+rf = RandomForestClassifier(
+    n_estimators=500,
+    max_depth=None,
+    min_samples_leaf=2,
+    class_weight="balanced",
+    random_state=42,
+    n_jobs=-1
+)
+
+# Scaling is not required for Random Forest.
+rf.fit(X_train, y_train)
+
+rf_pred = rf.predict(X_test)
+rf_prob = rf.predict_proba(X_test)[:, 1]
+
+
+# ============================================================
+# 8. MODEL 4: GRADIENT BOOSTING
+# ============================================================
+
+gb = GradientBoostingClassifier(
+    n_estimators=200,
+    learning_rate=0.05,
+    max_depth=3,
+    random_state=42
+)
+
+# Tree-based model, so unscaled predictors are appropriate.
+gb.fit(X_train, y_train)
+
+gb_pred = gb.predict(X_test)
+gb_prob = gb.predict_proba(X_test)[:, 1]
+
+
+# ============================================================
+# 9. MODEL EVALUATION
+# ============================================================
+
+def evaluate_model(name, y_true, prediction, probability):
+    """Return key classification metrics for one model."""
+
+    return {
+        "Model": name,
+        "Accuracy": accuracy_score(y_true, prediction),
+        "Precision": precision_score(y_true, prediction),
+        "Recall": recall_score(y_true, prediction),
+        "F1": f1_score(y_true, prediction),
+        "ROC_AUC": roc_auc_score(y_true, probability),
+        "PR_AUC": average_precision_score(y_true, probability)
+    }
+
+
+model_results = pd.DataFrame([
+    evaluate_model(
+        "Logistic Regression",
+        y_test,
+        logit_pred,
+        logit_prob
+    ),
+
+    evaluate_model(
+        "Neural Network",
+        y_test,
+        nn_pred,
+        nn_prob
+    ),
+
+    evaluate_model(
+        "Random Forest",
+        y_test,
+        rf_pred,
+        rf_prob
+    ),
+
+    evaluate_model(
+        "Gradient Boosting",
+        y_test,
+        gb_pred,
+        gb_prob
+    )
+])
+
+print("\nMODEL COMPARISON")
+print(
+    model_results
+    .set_index("Model")
+    .round(3)
+)
+
+
+print("\nGRADIENT BOOSTING CLASSIFICATION REPORT")
+print(classification_report(y_test, gb_pred))
+
+print("\nGRADIENT BOOSTING CONFUSION MATRIX")
+print(confusion_matrix(y_test, gb_pred))
+
+
+# ============================================================
+# 10. GRADIENT BOOSTING THRESHOLD ANALYSIS
+# ============================================================
+
+# The default classification threshold is 0.50.
+# We examine lower thresholds because retention programs may
+# prefer identifying more churners even at the cost of more
+# false-positive alerts.
+
+thresholds = [
+    0.50,
+    0.45,
+    0.40,
+    0.35,
+    0.30,
+    0.25
+]
+
+threshold_results = []
+
+for threshold in thresholds:
+
+    pred = (gb_prob >= threshold).astype(int)
+
+    tn, fp, fn, tp = confusion_matrix(
+        y_test,
+        pred
+    ).ravel()
+
+    threshold_results.append({
+        "Threshold": threshold,
+        "Precision": precision_score(y_test, pred),
+        "Recall": recall_score(y_test, pred),
+        "F1": f1_score(y_test, pred),
+        "True_Churners_Found": tp,
+        "Churners_Missed": fn,
+        "False_Alerts": fp,
+        "Customers_Flagged": pred.sum()
+    })
+
+
+gb_threshold_results = pd.DataFrame(
+    threshold_results
+)
+
+print("\nGRADIENT BOOSTING THRESHOLD ANALYSIS")
+print(
+    gb_threshold_results.round(3).to_string(
+        index=False
+    )
+)
+
+
+# ============================================================
+# 11. FEATURE IMPORTANCE
+# ============================================================
+
+feature_importance = pd.DataFrame({
+    "Feature": feature_names,
+    "Importance": gb.feature_importances_
+}).sort_values(
+    "Importance",
+    ascending=False
+)
+
+print("\nGRADIENT BOOSTING FEATURE IMPORTANCE")
+print(feature_importance.round(3))
+
+
+# Plot
+plot_importance = feature_importance.sort_values(
+    "Importance",
+    ascending=True
+)
+
+plt.figure(figsize=(8, 6))
+
+plt.barh(
+    plot_importance["Feature"],
+    plot_importance["Importance"]
+)
+
+plt.xlabel("Feature Importance")
+plt.ylabel("Feature")
+plt.title("Top Predictors of Customer Churn")
+
+plt.tight_layout()
+plt.show()
+
+
+# ============================================================
+# 12. CUSTOMER SEGMENTATION
+# ============================================================
+
+# Clustering is performed independently of the churn target.
+# Exited is deliberately excluded so clusters represent customer
+# characteristics rather than known churn outcomes.
+
+cluster_features = [
+    "CreditScore",
+    "Age",
+    "Tenure",
+    "Balance",
+    "NumOfProducts",
+    "IsActiveMember",
+    "EstimatedSalary"
+]
+
+X_cluster = df[cluster_features].copy()
+
+
+# K-Means is distance-based, so variables must be standardized.
+cluster_scaler = StandardScaler()
+
+X_cluster_scaled = cluster_scaler.fit_transform(
+    X_cluster
+)
+
+
+# ============================================================
+# 13. CHOOSE NUMBER OF CLUSTERS
+# ============================================================
+
+K = range(2, 9)
+
+inertia = []
+silhouette_scores = []
+
+for k in K:
+
+    model = KMeans(
+        n_clusters=k,
+        random_state=42,
+        n_init=10
+    )
+
+    labels = model.fit_predict(
+        X_cluster_scaled
+    )
+
+    inertia.append(
+        model.inertia_
+    )
+
+    silhouette_scores.append(
+        silhouette_score(
+            X_cluster_scaled,
+            labels
+        )
+    )
+
+
+silhouette_results = pd.DataFrame({
+    "Clusters": list(K),
+    "SilhouetteScore": silhouette_scores
+})
+
+print("\nSILHOUETTE RESULTS")
+print(silhouette_results.round(3))
+
+
+# Elbow plot
+plt.figure(figsize=(7, 5))
+
+plt.plot(
+    list(K),
+    inertia,
+    marker="o"
+)
+
+plt.xlabel("Number of Clusters")
+plt.ylabel("Inertia")
+plt.title("Elbow Method for Customer Segmentation")
+
+plt.tight_layout()
+plt.show()
+
+
+# ============================================================
+# 14. FINAL FOUR-CLUSTER SOLUTION
+# ============================================================
+
+# Four clusters are selected as an exploratory segmentation
+# solution balancing statistical separation and business
+# interpretability.
+
+kmeans = KMeans(
+    n_clusters=4,
+    random_state=42,
+    n_init=10
+)
+
+df["Cluster"] = kmeans.fit_predict(
+    X_cluster_scaled
+)
+
+
+cluster_profile = df.groupby("Cluster").agg(
+    Customers=("Exited", "size"),
+    Churners=("Exited", "sum"),
+    ChurnRate=("Exited", "mean"),
+    AvgAge=("Age", "mean"),
+    AvgCreditScore=("CreditScore", "mean"),
+    AvgTenure=("Tenure", "mean"),
+    AvgBalance=("Balance", "mean"),
+    AvgProducts=("NumOfProducts", "mean"),
+    ActiveRate=("IsActiveMember", "mean"),
+    AvgSalary=("EstimatedSalary", "mean")
+)
+
+cluster_profile["ChurnRate"] *= 100
+cluster_profile["ActiveRate"] *= 100
+
+print("\nCLUSTER PROFILES")
+print(cluster_profile.round(2))
+
+
+# ============================================================
+# 15. BUSINESS-FRIENDLY SEGMENT LABELS
+# ============================================================
+
+cluster_names = {
+    0: "Active High-Balance",
+    1: "Multi-Product Low-Balance",
+    2: "Inactive High-Balance",
+    3: "Older High-Risk"
+}
+
+df["Segment"] = df["Cluster"].map(
+    cluster_names
+)
+
+
+segment_summary = df.groupby("Segment").agg(
+    Customers=("Exited", "size"),
+    Churners=("Exited", "sum"),
+    ChurnRate=("Exited", "mean"),
+    AvgAge=("Age", "mean"),
+    AvgBalance=("Balance", "mean"),
+    AvgProducts=("NumOfProducts", "mean"),
+    ActiveRate=("IsActiveMember", "mean")
+)
+
+segment_summary["ChurnRate"] *= 100
+segment_summary["ActiveRate"] *= 100
+
+print("\nCUSTOMER SEGMENT SUMMARY")
+print(segment_summary.round(2))
+
+
+# ============================================================
+# 16. CHURN CONCENTRATION
+# ============================================================
+
+high_risk_segments = [
+    "Inactive High-Balance",
+    "Older High-Risk"
+]
+
+high_risk = df[
+    df["Segment"].isin(high_risk_segments)
+]
+
+customer_share = (
+    len(high_risk) / len(df)
+) * 100
+
+churn_share = (
+    high_risk["Exited"].sum()
+    / df["Exited"].sum()
+) * 100
+
+print("\nRETENTION PRIORITIZATION")
+print(
+    f"High-risk segments represent "
+    f"{customer_share:.2f}% of customers."
+)
+
+print(
+    f"They account for "
+    f"{churn_share:.2f}% of observed churn."
+)
+
+
+# ============================================================
+# 17. SAVE RESULTS
+# ============================================================
+
+model_results.to_csv(
+    "model_comparison.csv",
+    index=False
+)
+
+gb_threshold_results.to_csv(
+    "threshold_analysis.csv",
+    index=False
+)
+
+feature_importance.to_csv(
+    "feature_importance.csv",
+    index=False
+)
+
+segment_summary.to_csv(
+    "customer_segments.csv"
+)
+
+df.to_csv(
+    "customer_churn_segmented.csv",
+    index=False
+)
+
+print("\nAnalysis complete.")
