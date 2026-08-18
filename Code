@@ -539,7 +539,7 @@ print(cluster_profile.round(2))
 
 
 # ============================================================
-# 15. BUSINESS-FRIENDLY SEGMENT LABELS
+# 15.SOME BUSINESS-FRIENDLY SEGMENT LABELS
 # ============================================================
 
 cluster_names = {
@@ -605,32 +605,3 @@ print(
 )
 
 
-# ============================================================
-# 17. SAVE RESULTS
-# ============================================================
-
-model_results.to_csv(
-    "model_comparison.csv",
-    index=False
-)
-
-gb_threshold_results.to_csv(
-    "threshold_analysis.csv",
-    index=False
-)
-
-feature_importance.to_csv(
-    "feature_importance.csv",
-    index=False
-)
-
-segment_summary.to_csv(
-    "customer_segments.csv"
-)
-
-df.to_csv(
-    "customer_churn_segmented.csv",
-    index=False
-)
-
-print("\nAnalysis complete.")
